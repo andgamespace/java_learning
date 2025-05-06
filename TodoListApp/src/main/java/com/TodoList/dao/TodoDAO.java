@@ -1,4 +1,3 @@
-// src/main/java/com/TodoList/dao/TodoDAO.java
 package com.TodoList.dao;
 
 import com.TodoList.model.Todo;
@@ -7,24 +6,48 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
+/**
+ * Data Access Object for Todo items.
+ * Handles all database operations related to Todo entities.
+ */
 public class TodoDAO {
-    private final Connection connection;
+    private final DatabaseManager dbManager;
 
+    /**
+     * Creates a new TodoDAO instance.
+     */
     public TodoDAO() {
-        this.connection = DatabaseManager.getInstance().getConnection();
+        this.dbManager = DatabaseManager.getInstance();
     }
 
-    // Create a new todo item
+    /**
+     * Creates a new todo item in the database.
+     *
+     * @param todo The todo item to insert
+     * @return true if successful, false otherwise
+     * @throws IllegalArgumentException if todo is null or has invalid properties
+     */
     public boolean insert(Todo todo) {
-        String sql = "INSERT INTO todos (title, description, completed, due_date, created_at) VALUES (?, ?, ?, ?, ?)";
+        if (todo == null) {
+            throw new IllegalArgumentException("Todo cannot be null");
+        }
 
-        try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        String sql = "INSERT INTO todos (title, description, completed, due_date, created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
             statement.setString(1, todo.getTitle());
             statement.setString(2, todo.getDescription());
             statement.setInt(3, todo.isCompleted() ? 1 : 0);
             statement.setString(4, todo.getDueDate() != null ? todo.getDueDate().toString() : null);
-            statement.setString(5, todo.getCreatedAt().toString());
+
+            LocalDateTime now = LocalDateTime.now();
+            statement.setString(5, todo.getCreatedAt() != null ? todo.getCreatedAt().toString() : now.toString());
+            statement.setString(6, now.toString());
 
             int rowsInserted = statement.executeUpdate();
 
@@ -44,12 +67,17 @@ public class TodoDAO {
         }
     }
 
-    // Get all todo items
+    /**
+     * Retrieves all todo items from the database.
+     *
+     * @return A list of all todo items
+     */
     public List<Todo> getAll() {
         List<Todo> todos = new ArrayList<>();
         String sql = "SELECT * FROM todos ORDER BY created_at DESC";
 
-        try (Statement statement = connection.createStatement();
+        try (Connection conn = dbManager.getConnection();
+             Statement statement = conn.createStatement();
              ResultSet resultSet = statement.executeQuery(sql)) {
 
             while (resultSet.next()) {
@@ -62,35 +90,56 @@ public class TodoDAO {
         return todos;
     }
 
-    // Get todo item by ID
-    public Todo getById(int id) {
+    /**
+     * Retrieves a todo item by its ID.
+     *
+     * @param id The ID of the todo item
+     * @return An Optional containing the todo item if found, or empty if not found
+     */
+    public Optional<Todo> getById(int id) {
         String sql = "SELECT * FROM todos WHERE id = ?";
 
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+
             statement.setInt(1, id);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
-                    return extractTodoFromResultSet(resultSet);
+                    return Optional.of(extractTodoFromResultSet(resultSet));
                 }
             }
         } catch (SQLException e) {
             System.err.println("Error getting todo by id: " + e.getMessage());
         }
 
-        return null;
+        return Optional.empty();
     }
 
-    // Update a todo item
+    /**
+     * Updates an existing todo item.
+     *
+     * @param todo The todo item to update
+     * @return true if successful, false otherwise
+     * @throws IllegalArgumentException if todo is null or has invalid properties
+     */
     public boolean update(Todo todo) {
-        String sql = "UPDATE todos SET title = ?, description = ?, completed = ?, due_date = ? WHERE id = ?";
+        if (todo == null || todo.getId() <= 0) {
+            throw new IllegalArgumentException("Todo cannot be null and must have a valid ID");
+        }
 
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        String sql = "UPDATE todos SET title = ?, description = ?, completed = ?, " +
+                "due_date = ?, updated_at = ? WHERE id = ?";
+
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+
             statement.setString(1, todo.getTitle());
             statement.setString(2, todo.getDescription());
             statement.setInt(3, todo.isCompleted() ? 1 : 0);
             statement.setString(4, todo.getDueDate() != null ? todo.getDueDate().toString() : null);
-            statement.setInt(5, todo.getId());
+            statement.setString(5, LocalDateTime.now().toString());
+            statement.setInt(6, todo.getId());
 
             int rowsUpdated = statement.executeUpdate();
             return rowsUpdated > 0;
@@ -100,11 +149,22 @@ public class TodoDAO {
         }
     }
 
-    // Delete a todo item
+    /**
+     * Deletes a todo item by its ID.
+     *
+     * @param id The ID of the todo item to delete
+     * @return true if successful, false otherwise
+     */
     public boolean delete(int id) {
+        if (id <= 0) {
+            return false;
+        }
+
         String sql = "DELETE FROM todos WHERE id = ?";
 
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+
             statement.setInt(1, id);
 
             int rowsDeleted = statement.executeUpdate();
@@ -115,7 +175,59 @@ public class TodoDAO {
         }
     }
 
-    // Helper method to extract a Todo from a ResultSet
+    /**
+     * Gets all completed todo items.
+     *
+     * @return A list of completed todo items
+     */
+    public List<Todo> getCompleted() {
+        List<Todo> todos = new ArrayList<>();
+        String sql = "SELECT * FROM todos WHERE completed = 1 ORDER BY created_at DESC";
+
+        try (Connection conn = dbManager.getConnection();
+             Statement statement = conn.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+
+            while (resultSet.next()) {
+                todos.add(extractTodoFromResultSet(resultSet));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error getting completed todos: " + e.getMessage());
+        }
+
+        return todos;
+    }
+
+    /**
+     * Gets all pending (not completed) todo items.
+     *
+     * @return A list of pending todo items
+     */
+    public List<Todo> getPending() {
+        List<Todo> todos = new ArrayList<>();
+        String sql = "SELECT * FROM todos WHERE completed = 0 ORDER BY due_date ASC, created_at DESC";
+
+        try (Connection conn = dbManager.getConnection();
+             Statement statement = conn.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+
+            while (resultSet.next()) {
+                todos.add(extractTodoFromResultSet(resultSet));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error getting pending todos: " + e.getMessage());
+        }
+
+        return todos;
+    }
+
+    /**
+     * Helper method to extract a Todo from a ResultSet.
+     *
+     * @param resultSet The ResultSet to extract from
+     * @return A Todo object
+     * @throws SQLException if extraction fails
+     */
     private Todo extractTodoFromResultSet(ResultSet resultSet) throws SQLException {
         int id = resultSet.getInt("id");
         String title = resultSet.getString("title");
