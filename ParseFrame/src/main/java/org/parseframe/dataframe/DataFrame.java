@@ -1,5 +1,5 @@
 package org.parseframe.dataframe;
 
-public class Model {
-
+public class DataFrame {
+    
 }
